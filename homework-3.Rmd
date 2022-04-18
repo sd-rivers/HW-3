@@ -24,6 +24,13 @@ Load the data from `data/titanic.csv` into *R* and familiarize yourself with the
 ```{r}
 library(tidymodels)
 library(tidyverse)
+library(ISLR)
+library(ISLR2)
+library(discrim)
+library(poissonreg)
+library(corrr)
+library(klaR)
+tidymodels_prefer()
 
 set.seed(3435)
 
@@ -69,16 +76,58 @@ It is a good idea to use stratified sampling for this data because we will never
 Using the **training** data set, explore/describe the distribution of the outcome variable `survived`.
 
 ```{r}
+tit_train %>% 
+  ggplot(aes(x = survived)) +
+  geom_bar()
 
+tit_train %>% 
+  group_by(survived) %>% 
+  summarise(count = n())
+
+273/(439+273)
 ```
+
+So we have 273 survivors and 439 that did not survive or roughly a 38% survival ratio. I would describe this as a binomial distribution with p = 0.38.
 
 ### Question 3
 
 Using the **training** data set, create a correlation matrix of all continuous variables. Create a visualization of the matrix, and describe any patterns you see. Are any predictors correlated with each other? Which ones, and in which direction?
 
+```{r}
+tit_train %>% 
+  select(is.numeric) %>% 
+  cor(use="complete.obs") %>% 
+  corrplot(type = 'lower',
+           method = 'color',
+           diag = FALSE)
+
+cor_tit_train <- tit_train %>%
+  select(is.numeric) %>%
+  correlate(use="complete.obs")
+
+rplot(cor_tit_train)
+
+cor_tit_train %>%
+  stretch() %>%
+  ggplot(aes(x, y, fill = r)) +
+  geom_tile() +
+  geom_text(aes(label = as.character(fashion(r))))
+```
+
+Number of siblings/spouses on board is negatively correlated with the age of the passenger. Number of parents/children on board is positively correlated with number of siblings/spouses on board.
+
 ### Question 4
 
 Using the **training** data, create a recipe predicting the outcome variable `survived`. Include the following predictors: ticket class, sex, age, number of siblings or spouses aboard, number of parents or children aboard, and passenger fare.
+
+```{r}
+tit_recipe <- recipe(survived ~ pclass + sex + age + sib_sp + 
+                           parch + fare, data = tit_train) %>% 
+  step_impute_linear(age, impute_with = imp_vars(pclass, sex, age, sib_sp, 
+                           parch, fare)) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_interact(terms = ~ starts_with("sex"):fare + age:fare)
+```
 
 Recall that there were missing values for `age`. To deal with this, add an imputation step using `step_impute_linear()`. Next, use `step_dummy()` to **dummy** encode categorical predictors. Finally, include interactions between:
 
@@ -93,17 +142,66 @@ Specify a **logistic regression** model for classification using the `"glm"` eng
 
 ***Hint: Make sure to store the results of `fit()`. You'll need them later on.***
 
+```{r}
+log_reg <- logistic_reg() %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+log_wkflow <- workflow() %>% 
+  add_model(log_reg) %>% 
+  add_recipe(tit_recipe)
+
+log_fit <- fit(log_wkflow, tit_train)
+```
+
 ### Question 6
 
 **Repeat Question 5**, but this time specify a linear discriminant analysis model for classification using the `"MASS"` engine.
+
+```{r}
+lda_mod <- discrim_linear() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+lda_wkflow <- workflow() %>% 
+  add_model(lda_mod) %>% 
+  add_recipe(tit_recipe)
+
+lda_fit <- fit(lda_wkflow, tit_train)
+```
 
 ### Question 7
 
 **Repeat Question 5**, but this time specify a quadratic discriminant analysis model for classification using the `"MASS"` engine.
 
+```{r}
+qda_mod <- discrim_quad() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+qda_wkflow <- workflow() %>% 
+  add_model(qda_mod) %>% 
+  add_recipe(tit_recipe)
+
+qda_fit <- fit(qda_wkflow, tit_train)
+```
+
 ### Question 8
 
 **Repeat Question 5**, but this time specify a naive Bayes model for classification using the `"klaR"` engine. Set the `usekernel` argument to `FALSE`.
+
+```{r}
+nb_mod <- naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("klaR") %>% 
+  set_args(usekernel = FALSE) 
+
+nb_wkflow <- workflow() %>% 
+  add_model(nb_mod) %>% 
+  add_recipe(tit_recipe)
+
+nb_fit <- fit(nb_wkflow, tit_train)
+```
 
 ### Question 9
 
@@ -113,6 +211,44 @@ Use `predict()` and `bind_cols()` to generate predictions using each of these 4 
 
 Which model achieved the highest accuracy on the training data?
 
+```{r}
+predict(log_fit, new_data = tit_train, type = "prob")
+predict(lda_fit, new_data = tit_train, type = "prob")
+predict(qda_fit, new_data = tit_train, type = "prob")
+predict(nb_fit, new_data = tit_train, type = "prob")
+
+augment(log_fit, new_data = tit_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+augment(lda_fit, new_data = tit_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+augment(qda_fit, new_data = tit_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+augment(nb_fit, new_data = tit_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+
+log_reg_acc <- augment(log_fit, new_data = tit_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+lda_acc <- augment(lda_fit, new_data = tit_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+qda_acc <- augment(qda_fit, new_data = tit_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+nb_acc <- augment(nb_fit, new_data = tit_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+
+tit_train_acc <- bind_cols(log_reg_acc$.estimate, lda_acc$.estimate,
+      qda_acc$.estimate, nb_acc$.estimate)
+tit_train_acc
+
+accuracies <- c(log_reg_acc$.estimate, lda_acc$.estimate, qda_acc$.estimate, 
+                nb_acc$.estimate)
+models <- c("Logistic Regression", "LDA", "QDA", "Naive Bayes")
+results <- tibble(accuracies = accuracies, models = models)
+results %>% 
+  arrange(-accuracies)
+```
+
+The Logistic Regression model is the most accurate.
+
 ### Question 10
 
 Fit the model with the highest training accuracy to the **testing** data. Report the accuracy of the model on the **testing** data.
@@ -120,6 +256,20 @@ Fit the model with the highest training accuracy to the **testing** data. Report
 Again using the **testing** data, create a confusion matrix and visualize it. Plot an ROC curve and calculate the area under it (AUC).
 
 How did the model perform? Compare its training and testing accuracies. If the values differ, why do you think this is so?
+
+```{r}
+predict(log_fit, new_data = tit_test, type = "prob")
+augment(log_fit, new_data = tit_test) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+
+augment(log_fit, new_data = tit_test) %>%
+  multi_metric(truth = survived, estimate = .pred_class)
+
+augment(log_fit, new_data = tit_test) %>%
+  roc_curve(survived, .pred_Down) %>%
+  autoplot()
+```
 
 ### Required for 231 Students
 
