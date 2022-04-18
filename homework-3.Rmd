@@ -267,9 +267,14 @@ augment(log_fit, new_data = tit_test) %>%
   multi_metric(truth = survived, estimate = .pred_class)
 
 augment(log_fit, new_data = tit_test) %>%
-  roc_curve(survived, .pred_Down) %>%
+  roc_curve(survived, .pred_Yes) %>%
   autoplot()
+
+augment(log_fit, new_data = tit_test) %>%
+  roc_auc(survived, .pred_Yes)
 ```
+
+The model performed fairly well. In training the model had almost 82% accuracy. When applied to the testing data it went down to a 78%. The value went down due to noise and possibly over-fitting.
 
 ### Required for 231 Students
 
