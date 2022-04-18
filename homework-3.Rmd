@@ -30,6 +30,7 @@ library(discrim)
 library(poissonreg)
 library(corrr)
 library(klaR)
+library(corrplot)
 tidymodels_prefer()
 
 set.seed(3435)
